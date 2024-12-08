@@ -1,0 +1,8 @@
+# Virtual Enviroments
+**/*venv
+
+# Pycache
+**/__pycache__
+
+# Arquivo para adição das propriedades das unidades de processo
+add_properties.py
