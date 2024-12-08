@@ -1,0 +1,10 @@
+QHeaderView::section {
+  background-color: #1e1e1e; /* Cor dos headers */
+  color: #ffffff;            /* Cor do texto dos headers */
+  border: 1px solid #5a5a5a; /* Bordas dos headers */
+  padding: 4px;
+}
+QTableWidget QTableCornerButton::section {
+  background-color: #1e1e1e; /* Fundo da ponta superior esquerda */
+  border: 1px solid #5a5a5a; /* Bordas */
+}
