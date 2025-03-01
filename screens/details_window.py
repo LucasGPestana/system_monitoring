@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget, QLabel, QMessageBox
 from PySide6.QtGui import QIcon
+from PySide6.QtCore import QTimer
 
 from src.cpus.cpus_info_manager import CPUsInfoManager
 from src.processes.processes_info_manager import ProcessesInfoManager
@@ -91,6 +92,7 @@ class DetailsWindow(QWidget):
          
         case "created_time":
             
+            # Converte a data de criação de um processo para o formato dd-mm-yyyy
             data_label = QLabel(convertToDatetimeFormat(data))
         
         case _:
