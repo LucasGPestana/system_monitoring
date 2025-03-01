@@ -22,7 +22,15 @@ class ProcessInfo(UnitInfo):
     self.__ppid = process.ppid()
     self.__priority_number = process.nice()
     self.__owner_username = process.username()
-    self.__status = process.status()
+
+    # Mapeamento de traduções dos estados para pt-br
+    status_translation = {
+      "sleeping": "esperando",
+      "running": "executando",
+      "zombie": "zumbi"
+    }
+
+    self.__status = status_translation[process.status()]
     self.__executable_path = process.exe()
     self.__created_time = process.create_time()
     self.__threads_used_count = process.num_threads()
