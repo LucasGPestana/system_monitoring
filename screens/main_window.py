@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QLabel, QTableWidget, QTableWidgetItem, QMessageBox,
     QLineEdit, QComboBox
 )
-from PySide6.QtCore import Qt, QTimer, QModelIndex
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
 
 import pandas as pd
