@@ -1,14 +1,16 @@
 from PySide6.QtWidgets import (
     QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLayout, 
-    QLabel, QTableWidget, QTableWidgetItem, QMessageBox
+    QLabel, QTableWidget, QTableWidgetItem, QMessageBox,
+    QLineEdit, QComboBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, QModelIndex
 from PySide6.QtGui import QIcon
 
 import pandas as pd
 
 
 import os
+from typing import Any, Dict
 
 
 from screens.details_window import DetailsWindow
@@ -24,6 +26,8 @@ from utils.format_datetime import convertToDatetimeFormat
 from utils.icons import getSystemIconPath
 
 class MainWindow(QWidget):
+
+  """Janela principal do aplicativo, com as informações gerais do sistema"""
   
   def __init__(self) -> None:
 
@@ -33,24 +37,33 @@ class MainWindow(QWidget):
     self.setWindowIcon(QIcon(getSystemIconPath()))
     self.resize(700, 500)
 
+    self.selected_filter = "" # Atributo para filtro do módulo de processos
+    self.current_filter_text = "" # Texto do filtro do módulo de processos
+    self.current_row_index = 0 # Atributo para pegar o indice da linha selecionada na tabela
+
+    self.table_horiz_scroll_pos = 0
+    self.table_vert_scroll_pos = 0
+
     # Layout da tela
     self.main_layout = QVBoxLayout()
 
     self.setOptionsLayout()
     self.setInfoLayout()
 
-    self.main_layout.addLayout(self.info_layout)
+    # Adicionando um timer de atualização dos conteúdos
+    self.timer = QTimer(self)
+
+    # Iterável com objetos Connection correspondentes as conexões com o timer
+    self.timer_connections = list()
+
+    self.timer.start(10000) # Período de atualização de 5000ms (5s)
 
     self.setLayout(self.main_layout)
 
-    """
-    central_widget = QWidget()
-    central_widget.setLayout(self.main_layout)
-
-    self.setCentralWidget(central_widget)
-    """
-
   def setOptionsLayout(self) -> None:
+
+    """Adiciona o layout dos botões de opção (CPU, Processos, Partições e Baterias) na janela
+    """
 
     # layout das opções
     self.options_layout = QHBoxLayout()
@@ -67,6 +80,7 @@ class MainWindow(QWidget):
     self.options_layout.addWidget(btn_disk)
     self.options_layout.addWidget(btn_battery)
 
+    # Adicionando os escutadores de evento de cada botão
     btn_cpu.clicked.connect(self.loadCPUInfo)
     btn_process.clicked.connect(self.loadProcessInfo)
     btn_disk.clicked.connect(self.loadDiskInfo)
@@ -75,6 +89,14 @@ class MainWindow(QWidget):
     self.main_layout.addLayout(self.options_layout)
   
   def setGeneralInfoLayout(self, info_obj: InfoManager) -> None:
+
+    """Adiciona as informações gerais de um módulo (CPU, Processos, Partições ou Bateria), a partir do gerenciador desse módulo
+
+    Parameters
+    ----------
+    info_obj : InfoManager
+      A instância do gerenciador que deseja adicionar as informações gerais
+    """
 
     if isinstance(info_obj, CPUsInfoManager):
 
@@ -123,6 +145,10 @@ class MainWindow(QWidget):
       unique_info_layout.addWidget(QLabel(f"{label}: "))
 
       match attribute:
+
+         case "percentage_remaining":
+
+            data_label = QLabel(f"{data:.2f}".replace(".", ","))
          
          case "time_left":
             
@@ -139,9 +165,16 @@ class MainWindow(QWidget):
       unique_info_layout.addWidget(data_label)
 
       self.general_info_layout.addLayout(unique_info_layout)
-  
 
   def setSpecificInfoLayout(self, info_obj: InfoManager) -> None:
+
+    """Adiciona algumas informações específicas das unidades de um módulo (CPU, Processos ou Partições), a partir do gerenciador desse módulo
+
+    Parameters
+    ----------
+    info_obj : InfoManager
+      A instância do gerenciador que deseja adicionar as informações específicas das unidades
+    """
      
     # specific_infos corresponde aos atributos de cada unidade que aparecerão na tabela
      
@@ -176,29 +209,57 @@ class MainWindow(QWidget):
     
     else:
        
-       return
+       specific_infos = {}
+       units_attribute = ""
 
     self.specific_info_table = QTableWidget()
-    table_style_content: str = ""
+    
+    self.styleSpecificInfoTable()
 
-    TABLE_STYLE_PATH: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "styles", "table.txt")
+    self.insertUnitsInfoOnTable(info_obj, units_attribute, specific_infos)
+    
+    btn_details = QPushButton("Detalhes")
+    
+    if self.specific_info_layout.isEmpty():
 
-    with open(TABLE_STYLE_PATH, "r") as table_style_stream:
-       
-      table_style_content = table_style_stream.read()
+      self.specific_info_layout.addWidget(self.specific_info_table)
+      self.specific_info_layout.addWidget(btn_details)
+
+    btn_details.clicked.connect(lambda: self.openDetailsWindow(self.specific_info_table.currentRow(), 
+                                                               info_obj))
+
+    # Obtém o valor máximo de cada scroll bar                                                           
+    max_vert_scroll : int = self.specific_info_table.verticalScrollBar().maximum() or 1
+    max_horiz_scroll : int = self.specific_info_table.horizontalScrollBar().maximum() or 1
+    
+    # Define as posições dos scroll bars da última atualização na tela atual
+    self.specific_info_table.verticalScrollBar().setValue(self.table_vert_scroll_pos * max_vert_scroll)
+    self.specific_info_table.horizontalScrollBar().setValue(self.table_horiz_scroll_pos * max_horiz_scroll)
   
-    self.specific_info_table.setStyleSheet(table_style_content)
+  def insertUnitsInfoOnTable(self, info_obj: InfoManager, units_iterable_attr: str, attrs_to_show: Dict[str, str]) -> None:
+
+    """Insere os dados das unidades de um módulo na tabela de informações específicas
+
+    Parameters
+    ----------
+    info_obj : InfoManager
+      Gerenciador das informações do módulo cujas unidades serão exibidas (Exceto BatteryInfo)
+    units_iterable_attr : str
+      Nome do atributo correspondente ao iterável com as unidades de um módulo
+    attrs_to_show : Dict[str, str]
+      Nomes dos atributos dos dados que serão exibidos de cada unidade. As chaves correspondem aos nomes dos rótulos da tabela.
+    """
 
     # Adicionando os dados exibidos em uma lista contendo listas (estrutura bidimensional) para passá-los ao DataFrame
     data = list()
 
-    units = getattr(info_obj, units_attribute)
+    units = getattr(info_obj, units_iterable_attr)
 
     for unit in units:
        
       row_data = list()
 
-      for attribute in specific_infos.values():
+      for attribute in attrs_to_show.values():
           
           match attribute:
              
@@ -212,7 +273,7 @@ class MainWindow(QWidget):
         
       data.append(row_data)
     
-    df = pd.DataFrame(data, columns=list(specific_infos.keys()))
+    df = pd.DataFrame(data, columns=list(attrs_to_show.keys()))
 
     self.specific_info_table.setRowCount(df.shape[0])
     self.specific_info_table.setColumnCount(df.shape[1])
@@ -232,16 +293,93 @@ class MainWindow(QWidget):
     for j in range(0, df.shape[1]):
        
        self.specific_info_table.setColumnWidth(j, 175)
-    
-    btn_details = QPushButton("Detalhes")
-    
-    self.specific_info_layout.addWidget(self.specific_info_table)
-    self.specific_info_layout.addWidget(btn_details)
+  
+  def styleSpecificInfoTable(self) -> None:
 
-    btn_details.clicked.connect(lambda: self.openDetailsWindow(self.specific_info_table.currentRow(), 
-                                                               info_obj))
+    """Estiliza a tabela de informações especificas sobre as unidades de cada módulo (CPUs, Processos e Partições)
+    """
+
+    table_style_content: str = ""
+
+    TABLE_STYLE_PATH: str = os.path.join(
+       os.path.dirname(os.path.dirname(__file__)), 
+       "styles", 
+       "table.txt"
+       )
+
+    # Estilização da tabela
+    with open(TABLE_STYLE_PATH, "r") as table_style_stream:
+       
+      table_style_content = table_style_stream.read()
+  
+    self.specific_info_table.setStyleSheet(table_style_content)
+  
+  def setFilterLayout(self, proc_info_manager: ProcessesInfoManager) -> None:
+     
+     """Adiciona os widgets de filtro de unidades (Processos apenas)
+
+     Parameters
+     ----------
+     proc_info_manager : ProcessesInfoManager
+      Gerenciador de informações dos processos
+
+     """
+
+     # Verifica se o layout de filtro está vazio
+     if self.filter_layout.isEmpty():
+
+      filters = ["Nome", "PID", "Estado"]
+
+      self.filter_by_combobox = QComboBox()
+      self.filter_by_combobox.addItems(filters)
+
+      self.filter_value_input = QLineEdit()
+     
+      self.filter_value_input.textEdited.connect(lambda: self.filterProcessesTable(
+          proc_info_manager,
+          filters[self.filter_by_combobox.currentIndex()],
+          self.filter_value_input.text()
+      ))
+
+      self.filter_layout.addWidget(self.filter_by_combobox)
+      self.filter_layout.addWidget(self.filter_value_input)
+  
+  def filterProcessesTable(self, proc_info_manager: ProcessesInfoManager, 
+                           by: str, 
+                           value: Any) -> None:
+     
+     """Filtra e carrega a tabela das unidades de processos após esse filtro
+
+     Parameters
+     ----------
+     proc_info_manager : ProcessesInfoManager
+      Gerenciador de informações dos processos
+     by : str
+      Atributo do processo que será aplicado o filtro
+     value:
+      Valor do atributo do processo filtrado
+     """
+
+     self.selected_filter = by
+     self.current_filter_text = value
+
+     proc_info_manager.filterBy(by, value)
+
+     self.clearLayout(self.specific_info_layout)
+
+     self.setSpecificInfoLayout(proc_info_manager)
   
   def openDetailsWindow(self, selected_row: int, info_obj: InfoManager) -> None:
+
+    """Abre a janela de detalhes de uma unidade de algum dos módulos, a partir do gerenciador de informações e da linha da tabela selecionada
+
+    Parameters
+    ----------
+    selected_row : int
+      Linha da tabela selecionada
+    info_obj : InfoManager
+      Gerenciador de informações de um módulo (CPUs, processos ou Partições)
+    """
 
     if selected_row == -1:
        
@@ -254,26 +392,40 @@ class MainWindow(QWidget):
 
   def setInfoLayout(self) -> None:
 
-    """
-    Define o layout do container de informações. Ela é subdivida em um container dde informações gerais de todas as unidades, e outro container com informações mais especificas de cada unidade.
+    """Define o layout do container de informações. 
+    
+    Ela é subdivida em um container de informações gerais de todas as unidades, e outro container com informações mais especificas de cada unidade, além de um container de filtro (Apenas no módulo de Processos).
+
+    Esse método serve para alocar os espaços da tela para cada layout.
     """
 
     self.info_layout = QVBoxLayout()
 
     self.general_info_layout = QVBoxLayout()
 
+    self.filter_layout = QHBoxLayout()
+
     self.specific_info_layout = QVBoxLayout()
+
     self.specific_info_table = QTableWidget()
 
     self.specific_info_layout.addWidget(self.specific_info_table)
 
     self.info_layout.addLayout(self.general_info_layout)
+    self.info_layout.addLayout(self.filter_layout)
     self.info_layout.addLayout(self.specific_info_layout)
+
+    self.main_layout.addLayout(self.info_layout)
 
   def clearLayout(self, layout: QLayout) -> None:
 
     """
     Remove os widgets de um determinado layout
+
+    Parameters
+    ----------
+    layout : QLayout
+      Layout cujo widgets serão removidos
     """
 
     while layout.count():
@@ -293,42 +445,121 @@ class MainWindow(QWidget):
     """
     Carrega as informações da CPU
     """
+
+    if not self.specific_info_layout.isEmpty():
+
+      self.current_row_index = self.specific_info_table.currentRow()
+
+      # Pega as posições atuais de cada scroll da tabela
+      self.table_vert_scroll_pos : int = self.specific_info_table.verticalScrollBar().value()
+      self.table_horiz_scroll_pos : int = self.specific_info_table.horizontalScrollBar().value()
+
+    # Remove as conexões do timer para atualizar apenas a janela atual
+    for timer_connection in self.timer_connections:
+       
+       self.timer.timeout.disconnect(timer_connection)
+    
+    # Limpa todas as conexões na lista de conexões
+    self.timer_connections.clear()
+    
+    # Insere uma conexão correspondente ao módulo atual
+    conn_cpu = self.timer.timeout.connect(self.loadCPUInfo)
+    self.timer_connections.append(conn_cpu)
        
     cim = CPUsInfoManager()
 
     self.clearLayout(self.general_info_layout)
+    self.clearLayout(self.filter_layout)
     self.clearLayout(self.specific_info_layout)
 
     self.setGeneralInfoLayout(cim)
     self.setSpecificInfoLayout(cim)
+
+    # Seleciona a linha selecionada da última atualização
+    self.specific_info_table.selectRow(self.current_row_index)
   
   def loadProcessInfo(self) -> None:
 
     """
-    Carrega as informações dOs Processos
+    Carrega as informações dos Processos
     """
+
+    if not self.specific_info_layout.isEmpty():
+
+      self.current_row_index = self.specific_info_table.currentRow()
+
+      # Pega as posições atuais de cada scroll da tabela
+      self.table_vert_scroll_pos : int = self.specific_info_table.verticalScrollBar().value()
+      self.table_horiz_scroll_pos : int = self.specific_info_table.horizontalScrollBar().value()
+
+    # Remove as conexões do timer anteriores do timer
+    for timer_connection in self.timer_connections:
+       
+       self.timer.timeout.disconnect(timer_connection)
+    
+    # Limpa a lista de conexões
+    self.timer_connections.clear()
+    
+    # Cria uma nova conexão e a adiciona à lista
+    conn_proc = self.timer.timeout.connect(self.loadProcessInfo)
+    self.timer_connections.append(conn_proc)
 
     pim = ProcessesInfoManager()
 
+    if self.current_filter_text:
+
+      pim.filterBy(self.selected_filter, self.current_filter_text)
+
+    # Limpa os layouts
     self.clearLayout(self.general_info_layout)
     self.clearLayout(self.specific_info_layout)
 
+    # Carrega os layouts
     self.setGeneralInfoLayout(pim)
+    self.setFilterLayout(pim)
     self.setSpecificInfoLayout(pim)
-  
+
+    self.filter_value_input.setFocus()
+
+    # Define os resultados anteriores aos widgets de filtro
+    self.filter_by_combobox.setCurrentText(self.selected_filter) # Opção do combobox
+    self.filter_value_input.setText(self.current_filter_text) # Texto no lineedit
+    self.specific_info_table.selectRow(self.current_row_index) # linha selecionada
+
   def loadDiskInfo(self) -> None:
 
     """
     Carrega as informações das Partições de Disco
     """
 
+    if not self.specific_info_layout.isEmpty():
+
+      self.current_row_index = self.specific_info_table.currentRow()
+
+      # Pega as posições atuais de cada scroll da tabela
+      self.table_vert_scroll_pos : int = self.specific_info_table.verticalScrollBar().value()
+      self.table_horiz_scroll_pos : int = self.specific_info_table.horizontalScrollBar().value()
+
+    # Remove as conexões do timer para atualizar apenas a janela atual
+    for timer_connection in self.timer_connections:
+       
+       self.timer.timeout.disconnect(timer_connection)
+    
+    self.timer_connections.clear()
+    
+    conn_disk = self.timer.timeout.connect(self.loadDiskInfo)
+    self.timer_connections.append(conn_disk)
+
     dpim = DiskPartitionsInfoManager()
 
     self.clearLayout(self.general_info_layout)
+    self.clearLayout(self.filter_layout)
     self.clearLayout(self.specific_info_layout)
 
     self.setGeneralInfoLayout(dpim)
     self.setSpecificInfoLayout(dpim)
+
+    self.specific_info_table.selectRow(self.current_row_index)
   
   def loadBatteryInfo(self) -> None:
 
@@ -336,9 +567,20 @@ class MainWindow(QWidget):
     Carrega as informações da bateria
     """
 
+    # Remove as conexões do timer para atualizar apenas a janela atual
+    for timer_connection in self.timer_connections:
+       
+       self.timer.timeout.disconnect(timer_connection)
+    
+    self.timer_connections.clear()
+    
+    conn_battery = self.timer.timeout.connect(self.loadBatteryInfo)
+    self.timer_connections.append(conn_battery)
+
     bim = BatteryInfoManager()
 
     self.clearLayout(self.general_info_layout)
+    self.clearLayout(self.filter_layout)
     self.clearLayout(self.specific_info_layout)
 
     self.setGeneralInfoLayout(bim)
