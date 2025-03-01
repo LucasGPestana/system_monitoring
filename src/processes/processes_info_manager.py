@@ -27,22 +27,29 @@ class ProcessesInfoManager(InfoManager):
       except psutil.AccessDenied:
 
         pass
+
+      except psutil.ZombieProcess:
+
+        pass
+    
+    # Cópia de todos os processos
+    self.__all_processes_info = self.__processes_info.copy()
   
   @property
   def processes_count(self) -> int:
 
-    return len(self.__processes_info)
+    return len(self.__all_processes_info)
   
   @property
   def running_processes_count(self) -> int:
 
-    return len(list(filter(lambda x: x.status == "running", self.__processes_info)))
+    return len(list(filter(lambda x: x.status == "running", self.__all_processes_info)))
   
   @property
   def waiting_processes_count(self) -> int:
 
     return len(list(filter(lambda x: x.status in ["waiting", "stopped", "disk_sleep", "sleeping"], 
-                           self.__processes_info)))
+                           self.__all_processes_info)))
   
   @property
   def processes_info(self) -> List[ProcessInfo]:
@@ -54,6 +61,8 @@ class ProcessesInfoManager(InfoManager):
     """
     Filtra o iterável com as unidades de processo por meio de um valor recebido como entrada (value), correspondente a uma característica específica (by).
     """
+
+    self.__processes_info = self.__all_processes_info.copy()
 
     match by:
 
@@ -78,7 +87,15 @@ class ProcessesInfoManager(InfoManager):
       # Verifica se o campo não está vazio (Caso sim, não realiza filtro nenhum)
       if value:
 
-        self.__processes_info = list(filter(lambda x: getattr(x, attribute) == value, self.__processes_info))
+        value = int(value) if (attribute == "pid") and (value.isnumeric()) else value
+
+        self.__processes_info = list(filter(
+          lambda x: getattr(x, attribute) == value, 
+          self.__processes_info))
+      
+      else:
+
+        self.__processes_info = self.__all_processes_info.copy()
     
     else:
 
